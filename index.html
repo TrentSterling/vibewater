@@ -1,0 +1,537 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>WebGPU Water Simulation</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        :root {
+            --accent-color: #00aaff;
+            --panel-bg-color: rgba(30, 32, 37, 0.92);
+            --text-color-light: #e0e0e0;
+            --text-color-muted: #b0b0b0;
+            --info-color: #40d0ff;
+            --highlight-color: #ffae5a;
+            --border-radius: 6px;
+            --box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+            --transition-speed: 0.25s;
+            --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+        html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background-color: #111; font-family: var(--font-family); color: white; }
+        canvas { display: block; width: 100%; height: 100%; background-color: #0d0d1a; cursor: crosshair; }
+        canvas:active { cursor: grabbing; }
+        #infoToggleButton {
+            position: fixed; top: 10px; left: 10px;
+            background-color: rgba(50, 50, 55, 0.8); color: var(--text-color-light);
+            border: 1px solid rgba(255, 255, 255, 0.15); padding: 0.5rem 1rem;
+            border-radius: var(--border-radius); cursor: pointer; z-index: 102;
+            font-size: 0.85em; transition: all var(--transition-speed) ease;
+            backdrop-filter: blur(5px); box-shadow: var(--box-shadow);
+        }
+        #infoToggleButton:hover { background-color: rgba(70, 70, 75, 0.9); }
+        #descriptionArea {
+            position: absolute; top: 55px; left: 10px;
+            width: clamp(380px, 30vw, 520px); max-height: calc(100vh - 75px);
+            background: var(--panel-bg-color); padding: 1.2rem 1.5rem; box-sizing: border-box;
+            border-radius: var(--border-radius); border: 1px solid rgba(255, 255, 255, 0.1);
+            z-index: 100; pointer-events: auto; font-size: 0.85em;
+            overflow-y: auto; box-shadow: var(--box-shadow); line-height: 1.65;
+            opacity: 1; visibility: visible; transform: translateY(0%);
+            transition: opacity var(--transition-speed) ease, transform var(--transition-speed) ease, visibility 0s linear 0s;
+        }
+        #descriptionArea.hidden {
+            opacity: 0 !important; transform: translateY(-20px);
+            visibility: hidden !important; pointer-events: none !important;
+            transition: opacity var(--transition-speed) ease, transform var(--transition-speed) ease, visibility 0s linear var(--transition-speed);
+        }
+        #descriptionArea h2, h4 { margin-top: 0; margin-bottom: 0.8rem; text-align: left; font-weight: 600; }
+        #descriptionArea h2 { color: var(--info-color); font-size: 1.2em; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 0.4em;}
+        #descriptionArea h4 { margin-top: 1.2em; color: var(--highlight-color); font-size: 1em; }
+        #descriptionArea p, #descriptionArea ul, #descriptionArea div { margin-bottom: 0.8rem; color: var(--text-color-muted); }
+        #descriptionArea ul { list-style: disc; padding-left: 1.4rem; margin-top:0.2em; }
+        #descriptionArea a { color: var(--accent-color); text-decoration: none; }
+        #descriptionArea a:hover { text-decoration: underline; }
+        .control-row { display: flex; flex-direction: column; align-items: stretch; margin-bottom: 0.8rem; }
+        .control-row > div { display: flex; justify-content: space-between; align-items: center; }
+        .control-row label { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; justify-content: space-between; width: 100%;}
+        #descriptionArea input[type="range"] { flex-grow: 1; margin: 0 1rem; accent-color: var(--accent-color); }
+        .value-display { font-family: "SF Mono", "Consolas", "Roboto Mono", monospace; color: var(--text-color-light); background: rgba(0,0,0,0.2); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; min-width: 40px; text-align: right; }
+        .links { text-align: center; margin-top: 1.5rem; border-top: 1px solid #444; padding-top: 1rem; display: flex; justify-content: center; gap: 1.5rem; }
+    </style>
+</head>
+<body>
+    <button id="infoToggleButton">Hide Info</button>
+    <div id="descriptionArea">
+        <h2>WebGPU Water Simulation</h2>
+        <p>A real-time 2D wave simulation running entirely on the GPU. It uses a stable numerical integration method to solve the wave equation, allowing for realistic wave propagation and interaction.</p>
+
+        <h4>Controls</h4>
+        <ul>
+            <li><strong>Left Click & Drag:</strong> Disturbs the water surface.</li>
+            <li><strong>Right Click & Drag:</strong> Orbits the camera.</li>
+            <li><strong>Middle Mouse / Space + Drag:</strong> Pans the camera.</li>
+            <li><strong>Scroll Wheel:</strong> Zooms in and out.</li>
+        </ul>
+
+        <h4>Simulation</h4>
+        <div class="control-row">
+            <label>Damping<input type="range" id="damping" min="0.9" max="1.0" step="0.001" value="0.995"><span id="dampingVal" class="value-display"></span></label>
+        </div>
+        <div class="control-row">
+            <label>Propagation<input type="range" id="propagation" min="0.0" max="0.5" step="0.01" value="0.25"><span id="propagationVal" class="value-display"></span></label>
+        </div>
+        <div class="control-row">
+            <div>
+                <label for="pauseSim" style="justify-content: flex-start;"><input type="checkbox" id="pauseSim"> Pause Simulation</label>
+                <span>FPS: <span id="fps">--</span></span>
+            </div>
+        </div>
+        
+        <h4>Brush</h4>
+        <div class="control-row">
+            <label>Size<input type="range" id="brushSize" min="0.01" max="0.15" step="0.005" value="0.05"><span id="brushSizeVal" class="value-display"></span></label>
+        </div>
+        <div class="control-row">
+            <label>Strength<input type="range" id="brushStrength" min="0.05" max="1.5" step="0.05" value="0.5"><span id="brushStrengthVal" class="value-display"></span></label>
+        </div>
+
+        <h4>Rain</h4>
+        <div class="control-row">
+            <label for="rainToggle" style="justify-content: flex-start;"><input type="checkbox" id="rainToggle" checked> Enable Rain</label>
+        </div>
+        <div class="control-row">
+            <label>Frequency<input type="range" id="rainFreq" min="0.0" max="1.0" step="0.05" value="0.2"><span id="rainFreqVal" class="value-display"></span></label>
+        </div>
+        <div class="control-row">
+            <label>Size<input type="range" id="rainSize" min="0.0" max="1.0" step="0.05" value="0.5"><span id="rainSizeVal" class="value-display"></span></label>
+        </div>
+        <div class="control-row">
+            <label>Strength<input type="range" id="rainStrength" min="0.0" max="1.0" step="0.05" value="0.5"><span id="rainStrengthVal" class="value-display"></span></label>
+        </div>
+
+        <div class="links">
+             <a href="https://github.com/TrentSterling" target="_blank" rel="noopener noreferrer">GitHub</a>
+             <a href="https://tront.xyz/" target="_blank" rel="noopener noreferrer">tront.xyz</a>
+        </div>
+    </div>
+    <canvas id="webgpu-canvas"></canvas>
+    <script type="module">
+        async function main() {
+            if (!navigator.gpu) { document.getElementById('descriptionArea').innerHTML = `<h2>Error</h2><p>WebGPU is not supported. Please use a modern browser like Chrome or Edge.</p>`; return; }
+            const adapter = await navigator.gpu.requestAdapter();
+            if (!adapter) { throw new Error("No adapter found."); }
+            const device = await adapter.requestDevice();
+
+            const canvas = document.getElementById('webgpu-canvas');
+            const context = canvas.getContext('webgpu');
+            const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
+            const depthFormat = 'depth24plus';
+            context.configure({ device, format: presentationFormat, alphaMode: 'premultiplied' });
+
+            const SIM_GRID_SIZE = 512;
+            const RENDER_PLANE_SIZE = 50;
+            const RENDER_SEGMENTS = 255;
+            const textureFormat = 'r32float';
+            
+            const nState = device.createTexture({ size: [SIM_GRID_SIZE, SIM_GRID_SIZE], format: textureFormat, usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_SRC });
+            const nm1State = device.createTexture({ size: [SIM_GRID_SIZE, SIM_GRID_SIZE], format: textureFormat, usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+            const np1State = device.createTexture({ size: [SIM_GRID_SIZE, SIM_GRID_SIZE], format: textureFormat, usage: GPUTextureUsage.COPY_SRC | GPUTextureUsage.STORAGE_BINDING });
+            
+            const initialData = new Float32Array(SIM_GRID_SIZE * SIM_GRID_SIZE).fill(0);
+            device.queue.writeTexture({ texture: nState }, initialData.buffer, { bytesPerRow: SIM_GRID_SIZE * 4 }, { width: SIM_GRID_SIZE, height: SIM_GRID_SIZE });
+            device.queue.writeTexture({ texture: nm1State }, initialData.buffer, { bytesPerRow: SIM_GRID_SIZE * 4 }, { width: SIM_GRID_SIZE, height: SIM_GRID_SIZE });
+
+            const simulationShaderModule = device.createShaderModule({ code: `
+                struct SimParams {
+                    mouse_data: vec4<f32>,
+                    rain_data: vec4<f32>,
+                    damping: f32,
+                    propagation: f32,
+                    is_paused: u32,
+                    _padding: u32,
+                };
+                @group(0) @binding(0) var tex_n_state: texture_2d<f32>;
+                @group(0) @binding(1) var tex_nm1_state: texture_2d<f32>;
+                @group(0) @binding(2) var tex_np1_state: texture_storage_2d<r32float, write>;
+                @group(0) @binding(3) var<uniform> sim_params: SimParams;
+
+                @compute @workgroup_size(8, 8)
+                fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+                    let grid_size = vec2<i32>(textureDimensions(tex_n_state));
+                    let coord = vec2<i32>(id.xy);
+                    if (any(coord >= grid_size)) { return; }
+
+                    let ns_ij = textureLoad(tex_n_state, coord, 0).r;
+                    var newWaveHeight: f32;
+
+                    if (sim_params.is_paused == 1u) {
+                        newWaveHeight = ns_ij;
+                    } else {
+                        let nm1_ij = textureLoad(tex_nm1_state, coord, 0).r;
+                        let ns_ip1j = textureLoad(tex_n_state, clamp(coord + vec2(1, 0), vec2(0), grid_size - 1), 0).r;
+                        let ns_im1j = textureLoad(tex_n_state, clamp(coord - vec2(1, 0), vec2(0), grid_size - 1), 0).r;
+                        let ns_ijp1 = textureLoad(tex_n_state, clamp(coord + vec2(0, 1), vec2(0), grid_size - 1), 0).r;
+                        let ns_ijm1 = textureLoad(tex_n_state, clamp(coord - vec2(0, 1), vec2(0), grid_size - 1), 0).r;
+                        let laplacian = ns_ip1j + ns_im1j + ns_ijp1 + ns_ijm1 - 4.0 * ns_ij;
+                        newWaveHeight = (2.0 * ns_ij) - nm1_ij + laplacian * sim_params.propagation;
+                        newWaveHeight = newWaveHeight * sim_params.damping;
+                    }
+                    
+                    let uv = vec2<f32>(coord) / vec2<f32>(grid_size);
+                    if (sim_params.mouse_data.w > 0.0) {
+                        let dist = distance(uv, sim_params.mouse_data.xy);
+                        if (dist < sim_params.mouse_data.z) {
+                            newWaveHeight -= (1.0 - smoothstep(0.0, sim_params.mouse_data.z, dist)) * sim_params.mouse_data.w;
+                        }
+                    }
+                     if (sim_params.rain_data.w > 0.0) {
+                        let dist = distance(uv, sim_params.rain_data.xy);
+                        if (dist < sim_params.rain_data.z) {
+                             newWaveHeight += (1.0 - smoothstep(0.0, sim_params.rain_data.z, dist)) * sim_params.rain_data.w;
+                        }
+                    }
+                    textureStore(tex_np1_state, coord, vec4<f32>(newWaveHeight, 0.0, 0.0, 1.0));
+                }`
+            });
+
+            const simParamsBuffer = device.createBuffer({ size: 48, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+            const computeBindGroupLayout = device.createBindGroupLayout({ entries: [ { binding: 0, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'unfilterable-float' } }, { binding: 1, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'unfilterable-float' } }, { binding: 2, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'write-only', format: textureFormat } }, { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } } ]});
+            const computePipeline = device.createComputePipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [computeBindGroupLayout] }), compute: { module: simulationShaderModule, entryPoint: 'main' }});
+            const computeBindGroup = device.createBindGroup({ layout: computeBindGroupLayout, entries: [{ binding: 0, resource: nState.createView() }, { binding: 1, resource: nm1State.createView() }, { binding: 2, resource: np1State.createView() }, { binding: 3, resource: { buffer: simParamsBuffer } }]});
+            
+            const renderShaderModule = device.createShaderModule({ code: `
+                struct Uniforms { 
+                    viewProjectionMatrix: mat4x4<f32>, 
+                    cameraPos: vec3<f32>,
+                    _padding: f32,
+                    sunDirection: vec3<f32>,
+                    _padding2: f32,
+                };
+                @group(0) @binding(0) var<uniform> uniforms: Uniforms;
+                @group(0) @binding(1) var heightMap: texture_2d<f32>;
+                @group(0) @binding(2) var smp: sampler;
+
+                struct VertexOutput { @builtin(position) position: vec4<f32>, @location(0) uv: vec2<f32>, @location(1) world_pos: vec3<f32> };
+                
+                @vertex
+                fn vs_main(@location(0) inPos: vec3<f32>) -> VertexOutput {
+                    var out: VertexOutput;
+                    let uv = inPos.xz / ${RENDER_PLANE_SIZE.toFixed(1)} + 0.5;
+                    var pos = inPos;
+                    let height = textureSampleLevel(heightMap, smp, uv, 0.0).r;
+                    pos.y = clamp(height, -5.0, 5.0);
+                    out.position = uniforms.viewProjectionMatrix * vec4(pos, 1.0);
+                    out.uv = uv;
+                    out.world_pos = pos;
+                    return out;
+                }
+                @fragment
+                fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+                    let h_c = textureSampleLevel(heightMap, smp, in.uv, 0.0).r;
+                    let h_n = textureSampleLevel(heightMap, smp, in.uv + vec2(0.0, 1.0 / ${SIM_GRID_SIZE.toFixed(1)}), 0.0).r;
+                    let h_e = textureSampleLevel(heightMap, smp, in.uv + vec2(1.0 / ${SIM_GRID_SIZE.toFixed(1)}, 0.0), 0.0).r;
+                    let N = normalize(vec3(h_c - h_e, 2.0 / ${RENDER_PLANE_SIZE.toFixed(1)}, h_c - h_n));
+
+                    let light_dir = normalize(uniforms.sunDirection);
+                    let diffuse_intensity = max(0.0, dot(N, light_dir));
+                    let ambient = 0.2;
+                    let diffuse = (diffuse_intensity * 0.8 + ambient);
+
+                    let view_dir = normalize(uniforms.cameraPos - in.world_pos);
+                    let halfway_dir = normalize(light_dir + view_dir);
+                    let spec_angle = max(dot(N, halfway_dir), 0.0);
+                    let specular = pow(spec_angle, 64.0) * 0.75;
+                    
+                    let water_color = vec3(0.1, 0.4, 0.7);
+                    let final_color_lit = water_color * diffuse + vec3(specular);
+                    
+                    // --- Upgraded Reflections (No Fog) ---
+                    let SKY_COLOR_ZENITH = vec3(0.2, 0.3, 0.4); // Light color at top
+                    let SKY_COLOR_HORIZON = vec3(0.05, 0.1, 0.15); // Dark color at bottom
+
+                    let reflected_view_dir = reflect(-view_dir, N);
+                    let sky_gradient_factor = smoothstep(-0.1, 0.4, reflected_view_dir.y);
+                    let reflected_sky_color = mix(SKY_COLOR_HORIZON, SKY_COLOR_ZENITH, sky_gradient_factor);
+                    
+                    // Fresnel term for realistic reflection amount
+                    let fresnel = 0.05 + 0.95 * pow(1.0 - dot(N, view_dir), 5.0);
+                    
+                    let final_color = mix(final_color_lit, reflected_sky_color, fresnel);
+                    return vec4(final_color, 1.0);
+                }`
+            });
+            
+            const skyShaderModule = device.createShaderModule({ code: `
+                struct SkyUniforms {
+                    invViewProjectionMatrix: mat4x4<f32>,
+                    cameraPos: vec3<f32>,
+                    _padding: f32, // Explicit padding
+                };
+                @group(0) @binding(0) var<uniform> sky_uniforms: SkyUniforms;
+
+                struct VertexOutput { @builtin(position) pos: vec4<f32>, @location(0) world_dir: vec3<f32> };
+
+                @vertex
+                fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> VertexOutput {
+                    var out: VertexOutput;
+                    let positions = array<vec2<f32>, 4>(
+                        vec2<f32>(-1.0,  1.0), vec2<f32>(-1.0, -1.0),
+                        vec2<f32>( 1.0,  1.0), vec2<f32>( 1.0, -1.0)
+                    );
+                    out.pos = vec4<f32>(positions[in_vertex_index], 1.0, 1.0);
+                    let unprojected = sky_uniforms.invViewProjectionMatrix * out.pos;
+                    out.world_dir = normalize(unprojected.xyz / unprojected.w - sky_uniforms.cameraPos);
+                    return out;
+                }
+
+                @fragment
+                fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+                    let SKY_COLOR_ZENITH = vec3(0.2, 0.3, 0.4); // Light color at top
+                    let SKY_COLOR_HORIZON = vec3(0.05, 0.1, 0.15); // Dark color at bottom
+
+                    let gradient_factor = smoothstep(-0.1, 0.4, in.world_dir.y);
+                    let final_color = mix(SKY_COLOR_HORIZON, SKY_COLOR_ZENITH, gradient_factor);
+                    return vec4<f32>(final_color, 1.0);
+                }`
+            });
+
+            const vertices = new Float32Array((RENDER_SEGMENTS + 1) * (RENDER_SEGMENTS + 1) * 3); const indices = new Uint32Array(RENDER_SEGMENTS * RENDER_SEGMENTS * 6);
+            let v = 0; for (let i = 0; i <= RENDER_SEGMENTS; i++) { const z = (i / RENDER_SEGMENTS - 0.5) * RENDER_PLANE_SIZE; for (let j = 0; j <= RENDER_SEGMENTS; j++) { const x = (j / RENDER_SEGMENTS - 0.5) * RENDER_PLANE_SIZE; vertices[v++] = x; vertices[v++] = 0; vertices[v++] = z; } }
+            let idx = 0; for (let i = 0; i < RENDER_SEGMENTS; i++) { for (let j = 0; j < RENDER_SEGMENTS; j++) { const a = i * (RENDER_SEGMENTS + 1) + j, b = a + 1, c = a + (RENDER_SEGMENTS + 1), d = c + 1; indices[idx++] = a; indices[idx++] = c; indices[idx++] = b; indices[idx++] = b; indices[idx++] = c; indices[idx++] = d; } }
+            const vertexBuffer = device.createBuffer({ size: vertices.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST }); device.queue.writeBuffer(vertexBuffer, 0, vertices);
+            const indexBuffer = device.createBuffer({ size: indices.byteLength, usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST }); device.queue.writeBuffer(indexBuffer, 0, indices);
+            const renderUniformsBuffer = device.createBuffer({ size: 96, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+            
+            const sampler = device.createSampler({});
+            const renderBindGroupLayout = device.createBindGroupLayout({ entries: [ { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: {} }, { binding: 1, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, texture: { sampleType: 'unfilterable-float' } }, { binding: 2, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, sampler: { type: 'non-filtering' } } ]});
+            const renderPipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [renderBindGroupLayout] });
+            const renderPipeline = device.createRenderPipeline({ layout: renderPipelineLayout, vertex: { module: renderShaderModule, entryPoint: 'vs_main', buffers: [{ arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }] }] }, fragment: { module: renderShaderModule, entryPoint: 'fs_main', targets: [{ format: presentationFormat }] }, primitive: { topology: 'triangle-list', cullMode: 'none' }, depthStencil: { depthWriteEnabled: true, depthCompare: 'less', format: depthFormat } });
+            
+            const skyUniformsBuffer = device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+            const skyBindGroupLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX, buffer: {} }] });
+            const skyPipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [skyBindGroupLayout] });
+            const skyPipeline = device.createRenderPipeline({ layout: skyPipelineLayout, vertex: { module: skyShaderModule, entryPoint: 'vs_main' }, fragment: { module: skyShaderModule, entryPoint: 'fs_main', targets: [{ format: presentationFormat }] }, primitive: { topology: 'triangle-strip' }, depthStencil: { depthWriteEnabled: false, depthCompare: 'always', format: depthFormat } });
+            const skyBindGroup = device.createBindGroup({ layout: skyBindGroupLayout, entries: [{ binding: 0, resource: { buffer: skyUniformsBuffer } }] });
+            let renderBindGroup;
+
+            const camera = { yaw: -Math.PI / 4, pitch: Math.PI / 6, distance: 80, target: [0, 0, 0] };
+            const mouse = { x: 0, y: 0, lastX: 0, lastY: 0, buttons: 0 };
+            let spacebarDown = false;
+            let currentViewMatrix;
+            const PAN_SENSITIVITY = 0.1;
+
+            const simParamsData = new Float32Array(12);
+            const simParamsDataU32 = new Uint32Array(simParamsData.buffer);
+
+            let rainTimer = 0;
+            let controlVars = {};
+            let rainEnabled, isPaused;
+            let time = 0; // For animating the sun
+
+            const controlMapping = [
+                { id: 'damping', key: 'damping', format: v => v.toFixed(3) },
+                { id: 'propagation', key: 'propagation', format: v => v.toFixed(2) },
+                { id: 'brushSize', key: 'brushSize', format: v => v.toFixed(2) },
+                { id: 'brushStrength', key: 'brushStrength', format: v => v.toFixed(2) },
+                { id: 'rainFreq', key: 'rainFreq', format: v => v.toFixed(2) },
+                { id: 'rainSize', key: 'rainSize', format: v => v.toFixed(2) },
+                { id: 'rainStrength', key: 'rainStrength', format: v => v.toFixed(2) },
+            ];
+            
+            controlMapping.forEach(c => {
+                const el = document.getElementById(c.id);
+                const valEl = document.getElementById(c.id + 'Val');
+                const update = () => {
+                    controlVars[c.key] = parseFloat(el.value);
+                    if (valEl) valEl.textContent = c.format(controlVars[c.key]);
+                };
+                el.addEventListener('input', update);
+                update();
+            });
+
+            const rainToggle = document.getElementById('rainToggle');
+            rainToggle.addEventListener('change', () => { rainEnabled = rainToggle.checked });
+            rainEnabled = rainToggle.checked;
+            
+            const pauseSim = document.getElementById('pauseSim');
+            pauseSim.addEventListener('change', () => { isPaused = pauseSim.checked });
+            isPaused = pauseSim.checked;
+
+            document.getElementById('infoToggleButton').onclick = () => { 
+                const area = document.getElementById('descriptionArea');
+                area.classList.toggle('hidden');
+                document.getElementById('infoToggleButton').textContent = area.classList.contains('hidden') ? 'Show Info' : 'Hide Info';
+            };
+            
+            canvas.addEventListener('contextmenu', e => e.preventDefault());
+            canvas.addEventListener('mousedown', (e) => {
+                mouse.buttons = e.buttons;
+                mouse.lastX = e.clientX;
+                mouse.lastY = e.clientY;
+            });
+            window.addEventListener('mouseup', (e) => {
+                mouse.buttons = 0;
+            });
+            window.addEventListener('keydown', (e) => { if (e.code === 'Space') spacebarDown = true; });
+            window.addEventListener('keyup', (e) => { if (e.code === 'Space') spacebarDown = false; });
+            
+            canvas.addEventListener('mousemove', (e) => {
+                const dx = e.clientX - mouse.lastX;
+                const dy = e.clientY - mouse.lastY;
+                mouse.buttons = e.buttons;
+
+                if (mouse.buttons === 2) { 
+                    camera.yaw -= dx * 0.005; camera.pitch -= dy * 0.005; camera.pitch = Math.max(-Math.PI/2 + 0.1, Math.min(Math.PI/2 - 0.1, camera.pitch)); 
+                }
+                const isPanning = (mouse.buttons & 4) === 4 || (spacebarDown && (mouse.buttons & 1) === 1);
+                if (isPanning && currentViewMatrix) {
+                    const invView = mat4.invert(currentViewMatrix);
+                    const right = [invView[0], invView[1], invView[2]];
+                    const up = [invView[4], invView[5], invView[6]];
+                    const panSpeed = PAN_SENSITIVITY * (camera.distance / 100);
+                    camera.target[0] -= (right[0] * dx - up[0] * dy) * panSpeed;
+                    camera.target[1] -= (right[1] * dx - up[1] * dy) * panSpeed;
+                    camera.target[2] -= (right[2] * dx - up[2] * dy) * panSpeed;
+                }
+                mouse.x = e.clientX;
+                mouse.y = e.clientY;
+                mouse.lastX = e.clientX;
+                mouse.lastY = e.clientY;
+            });
+            canvas.addEventListener('wheel', (e) => { e.preventDefault(); camera.distance = Math.max(10, Math.min(300, camera.distance + e.deltaY * 0.1)); }, { passive: false });
+            
+            const vec4={transform:(v,m)=>{const d=v[0],e=v[1],f=v[2],g=v[3];let a=m[0]*d+m[4]*e+m[8]*f+m[12]*g,b=m[1]*d+m[5]*e+m[9]*f+m[13]*g,c=m[2]*d+m[6]*e+m[10]*f+m[14]*g;return[a,b,c,m[3]*d+m[7]*e+m[11]*f+m[15]*g]}};const mat4={create:()=>new Float32Array([1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]),invert:a=>{let b=new Float32Array(16),c=a[0],d=a[1],e=a[2],f=a[3],g=a[4],h=a[5],i=a[6],j=a[7],k=a[8],l=a[9],m=a[10],n=a[11],o=a[12],p=a[13],q=a[14],r=a[15],s=c*h-d*g,t=c*i-e*g,u=c*j-f*g,v=d*i-e*h,w=d*j-f*h,x=e*j-f*i,y=k*p-l*o,z=k*q-m*o,A=k*r-n*o,B=l*q-m*p,C=l*r-n*p,D=m*r-n*q,E=1/(s*D-t*C+u*B+v*A-w*z+x*y);return b[0]=(h*D-i*C+j*B)*E,b[1]=(-d*D+e*C-f*B)*E,b[2]=(p*x-q*w+r*v)*E,b[3]=(-l*x+m*w-n*v)*E,b[4]=(-g*D+i*A-j*z)*E,b[5]=(c*D-e*A+f*z)*E,b[6]=(-o*x+q*u-r*t)*E,b[7]=(k*x-m*u+n*t)*E,b[8]=(g*C-h*A+j*y)*E,b[9]=(-c*C+d*A-f*y)*E,b[10]=(o*w-p*u+r*s)*E,b[11]=(-k*w+l*u-n*s)*E,b[12]=(-g*B+h*z-i*y)*E,b[13]=(c*B-d*z+e*y)*E,b[14]=(-o*v+p*t-q*s)*E,b[15]=(k*v-l*t+m*s)*E,b},multiply:(a,b)=>{let c=new Float32Array(16),d=a[0],e=a[1],f=a[2],g=a[3],h=a[4],i=a[5],j=a[6],k=a[7],l=a[8],m=a[9],n=a[10],o=a[11],p=a[12],q=a[13],r=a[14],s=a[15],t=b[0],u=b[1],v=b[2],w=b[3];return c[0]=t*d+u*h+v*l+w*p,c[1]=t*e+u*i+v*m+w*q,c[2]=t*f+u*j+v*n+w*r,c[3]=t*g+u*k+v*o+w*s,t=b[4],u=b[5],v=b[6],w=b[7],c[4]=t*d+u*h+v*l+w*p,c[5]=t*e+u*i+v*m+w*q,c[6]=t*f+u*j+v*n+w*r,c[7]=t*g+u*k+v*o+w*s,t=b[8],u=b[9],v=b[10],w=b[11],c[8]=t*d+u*h+v*l+w*p,c[9]=t*e+u*i+v*m+w*q,c[10]=t*f+u*j+v*n+w*r,c[11]=t*g+u*k+v*o+w*s,t=b[12],u=b[13],v=b[14],w=b[15],c[12]=t*d+u*h+v*l+w*p,c[13]=t*e+u*i+v*m+w*q,c[14]=t*f+u*j+v*n+w*r,c[15]=t*g+u*k+v*o+w*s,c},lookAt:(e,t,u)=>{let n=new Float32Array(16),o=e[0]-t[0],r=e[1]-t[1],s=e[2]-t[2],a=1/Math.hypot(o,r,s);o*=a,r*=a,s*=a;let i=u[1]*s-u[2]*r,c=u[2]*o-u[0]*s,f=u[0]*r-u[1]*o;a=1/Math.hypot(i,c,f),i*=a,c*=a,f*=a;let l=r*f-s*c,d=s*i-o*f,m=o*c-r*i;return n[0]=i,n[1]=l,n[2]=o,n[3]=0,n[4]=c,n[5]=d,n[6]=r,n[7]=0,n[8]=f,n[9]=m,n[10]=s,n[11]=0,n[12]=-(i*e[0]+c*e[1]+f*e[2]),n[13]=-(l*e[0]+d*e[1]+m*e[2]),n[14]=-(o*e[0]+r*e[1]+s*e[2]),n[15]=1,n},perspective:(f,a,n,r)=>{const out=new Float32Array(16);const t=1/Math.tan(f/2);out[0]=t/a;out[5]=t;out[10]=(r+n)/(n-r);out[11]=-1;out[14]=2*r*n/(n-r);return out;}};
+
+            let depthTexture;
+            let resizeNeeded = true;
+            new ResizeObserver(() => { resizeNeeded = true; }).observe(canvas);
+
+            let lastFrameTime = performance.now();
+            function frame() {
+                const deltaTime = (performance.now() - lastFrameTime) / 1000.0;
+                lastFrameTime = performance.now();
+                time += deltaTime * 0.3; // Controls sun speed
+
+                if (resizeNeeded) {
+                    resizeNeeded = false;
+                    const dpr = window.devicePixelRatio || 1;
+                    const width = Math.max(1, Math.round(canvas.clientWidth * dpr));
+                    const height = Math.max(1, Math.round(canvas.clientHeight * dpr));
+                    
+                    if (!depthTexture || canvas.width !== width || canvas.height !== height) {
+                        if (depthTexture) { depthTexture.destroy(); }
+                        depthTexture = device.createTexture({
+                            size: [width, height], format: depthFormat, usage: GPUTextureUsage.RENDER_ATTACHMENT,
+                        });
+                        canvas.width = width;
+                        canvas.height = height;
+                    }
+                }
+
+                const eye = [ camera.target[0] + camera.distance * Math.cos(camera.pitch) * Math.sin(camera.yaw), camera.target[1] + camera.distance * Math.sin(camera.pitch), camera.target[2] + camera.distance * Math.cos(camera.pitch) * Math.cos(camera.yaw) ];
+                currentViewMatrix = mat4.lookAt(eye, camera.target, [0, 1, 0]);
+                const projectionMatrix = mat4.perspective(Math.PI / 4, canvas.width / canvas.height, 0.1, 500);
+                const viewProjectionMatrix = mat4.multiply(projectionMatrix, currentViewMatrix);
+                
+                const sunX = Math.cos(time);
+                const sunZ = Math.sin(time);
+                const sunDirection = new Float32Array([sunX, 0.8, sunZ]);
+
+                device.queue.writeBuffer(renderUniformsBuffer, 0, viewProjectionMatrix);
+                device.queue.writeBuffer(renderUniformsBuffer, 64, new Float32Array(eye));
+                device.queue.writeBuffer(renderUniformsBuffer, 80, sunDirection);
+                
+                const invViewProjectionMatrix = mat4.invert(viewProjectionMatrix);
+                device.queue.writeBuffer(skyUniformsBuffer, 0, invViewProjectionMatrix);
+                device.queue.writeBuffer(skyUniformsBuffer, 64, new Float32Array(eye));
+
+                simParamsData.fill(0); 
+                simParamsData[8] = controlVars.damping;
+                simParamsData[9] = controlVars.propagation;
+                simParamsDataU32[10] = isPaused ? 1 : 0;
+
+                const isBrushing = (mouse.buttons & 1) === 1 && !spacebarDown && document.activeElement.type !== 'range';
+                if (isBrushing) {
+                    const invVP = mat4.invert(viewProjectionMatrix);
+                    const rect = canvas.getBoundingClientRect();
+                    const clipX = (mouse.x - rect.left) / rect.width * 2 - 1;
+                    const clipY = (mouse.y - rect.top) / rect.height * -2 + 1;
+                    const near = vec4.transform([clipX, clipY, -1, 1], invVP); const far = vec4.transform([clipX, clipY, 1, 1], invVP);
+                    near[0] /= near[3]; near[1] /= near[3]; near[2] /= near[3]; far[0] /= far[3]; far[1] /= far[3]; far[2] /= far[3];
+                    const dir = [far[0] - near[0], far[1] - near[1], far[2] - near[2]];
+                    const t = -near[1] / (dir[1] || -1e-6);
+                    if (t > 0 && t < camera.distance * 2) {
+                        const intersectPos = [near[0] + t * dir[0], near[2] + t * dir[2]];
+                        const u = (intersectPos[0] / RENDER_PLANE_SIZE) + 0.5; const v = (intersectPos[1] / RENDER_PLANE_SIZE) + 0.5;
+                        if (u >= 0 && u <= 1 && v >= 0 && v <= 1) simParamsData.set([u, v, controlVars.brushSize, controlVars.brushStrength], 0);
+                    }
+                }
+                
+                rainTimer -= deltaTime;
+                if(rainEnabled && rainTimer <= 0 && !isPaused) {
+                    if (Math.random() < controlVars.rainFreq) {
+                        simParamsData[4] = Math.random(); 
+                        simParamsData[5] = Math.random();
+                        simParamsData[6] = 0.01 + Math.random() * 0.03 * controlVars.rainSize; 
+                        simParamsData[7] = 0.1 + Math.random() * 0.3 * controlVars.rainStrength;
+                    }
+                    rainTimer = 1/60;
+                }
+                device.queue.writeBuffer(simParamsBuffer, 0, simParamsData);
+
+                const commandEncoder = device.createCommandEncoder();
+                
+                const shouldSimulate = !isPaused;
+                const shouldPaint = isPaused && isBrushing;
+
+                if (shouldSimulate) {
+                    for (let i = 0; i < 2; i++) {
+                        const computePass = commandEncoder.beginComputePass();
+                        computePass.setPipeline(computePipeline);
+                        computePass.setBindGroup(0, computeBindGroup);
+                        computePass.dispatchWorkgroups(Math.ceil(SIM_GRID_SIZE / 8), Math.ceil(SIM_GRID_SIZE / 8));
+                        computePass.end();
+                        commandEncoder.copyTextureToTexture({ texture: nState }, { texture: nm1State }, { width: SIM_GRID_SIZE, height: SIM_GRID_SIZE });
+                        commandEncoder.copyTextureToTexture({ texture: np1State }, { texture: nState }, { width: SIM_GRID_SIZE, height: SIM_GRID_SIZE });
+                    }
+                } else if (shouldPaint) {
+                    const computePass = commandEncoder.beginComputePass();
+                    computePass.setPipeline(computePipeline);
+                    computePass.setBindGroup(0, computeBindGroup);
+                    computePass.dispatchWorkgroups(Math.ceil(SIM_GRID_SIZE / 8), Math.ceil(SIM_GRID_SIZE / 8));
+                    computePass.end();
+                    commandEncoder.copyTextureToTexture({ texture: np1State }, { texture: nState }, { width: SIM_GRID_SIZE, height: SIM_GRID_SIZE });
+                    commandEncoder.copyTextureToTexture({ texture: nState }, { texture: nm1State }, { width: SIM_GRID_SIZE, height: SIM_GRID_SIZE });
+                }
+                
+                renderBindGroup = device.createBindGroup({ layout: renderBindGroupLayout, entries: [{ binding: 0, resource: { buffer: renderUniformsBuffer } }, { binding: 1, resource: nState.createView() }, { binding: 2, resource: sampler }]});
+
+                const renderPassDescriptor = {
+                    colorAttachments: [{ view: context.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0.0, 0.0, 0.0, 1.0] }],
+                    depthStencilAttachment: { view: depthTexture.createView(), depthClearValue: 1.0, depthLoadOp: 'clear', depthStoreOp: 'store' }
+                };
+                const renderPass = commandEncoder.beginRenderPass(renderPassDescriptor);
+                
+                renderPass.setPipeline(skyPipeline);
+                renderPass.setBindGroup(0, skyBindGroup);
+                renderPass.draw(4);
+
+                renderPass.setPipeline(renderPipeline);
+                renderPass.setBindGroup(0, renderBindGroup);
+                renderPass.setVertexBuffer(0, vertexBuffer);
+                renderPass.setIndexBuffer(indexBuffer, 'uint32');
+                renderPass.drawIndexed(indices.length);
+                renderPass.end();
+
+                device.queue.submit([commandEncoder.finish()]);
+                
+                document.getElementById('fps').textContent = (1.0 / deltaTime).toFixed(1);
+                requestAnimationFrame(frame);
+            }
+            requestAnimationFrame(frame);
+        }
+        main().catch(err => { console.error(err); document.getElementById('descriptionArea').innerHTML = `<h2>Error</h2><p>${err.message}</p><p>Please ensure you are using a modern browser like Chrome or Edge with WebGPU enabled.</p>`; });
+    </script>
+</body>
+</html>
