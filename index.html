@@ -2,6 +2,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<meta name="description" content="2D water compute shader with 3D vertex displacement, a WebGPU demo.">
 <!-- Google tag (GA4) -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-27SVZGYHZ3"></script>
 <script>
@@ -541,5 +542,10 @@
         }
         main().catch(err => { console.error(err); document.getElementById('descriptionArea').innerHTML = `<h2>Error</h2><p>${err.message}</p><p>Please ensure you are using a modern browser like Chrome or Edge with WebGPU enabled.</p>`; });
     </script>
+<!-- tront-about:start -->
+<style>.tront-about{position:fixed;left:12px;bottom:12px;z-index:2147483000;font:13px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif;color:#e9ecef;text-align:left}.tront-about>summary{cursor:pointer;list-style:none;display:inline-block;background:#0b0d10d9;color:#e9ecef;border:1px solid #ffffff33;border-radius:999px;padding:6px 12px;backdrop-filter:blur(6px);user-select:none}.tront-about>summary::-webkit-details-marker{display:none}.tront-about>summary:hover{border-color:#ffffff66}.tront-about>div{margin-top:8px;width:min(560px,calc(100vw - 24px));max-height:70vh;overflow:auto;background:#0b0d10f5;border:1px solid #ffffff33;border-radius:12px;padding:14px 16px;box-shadow:0 12px 40px #000a}.tront-about h2{font-size:17px;margin:0 0 8px;color:#fff}.tront-about p{margin:0 0 9px}.tront-about a{color:#8fd3ff}.tront-about ul{margin:4px 0 10px;padding-left:18px}.tront-about li{margin:2px 0}.tront-about .tront-hub{opacity:.85;font-size:12px}</style>
+<details class="tront-about" id="trontAbout"><summary>About &middot; More by Tront</summary><div><h2>VibeWater by Tront</h2><p>VibeWater simulates water in a 2D compute shader and displays it as a displaced 3D surface, so the ripples you see are the simulation rather than an animation. It was written as a WebGPU prototype for a technique later moved into Unity.</p><p>One page, no install, needs a desktop browser with WebGPU. By Tront (Trent Sterling).</p><p><strong>More from Tront</strong></p><ul><li><a href="https://tront.xyz/vibesand/">VibeSand</a>: WebGPU falling-sand simulation: two million voxels updating at 60fps.</li><li><a href="https://tront.xyz/ballpit/">BALLPIT</a>: GPU contact physics testbed: 20,000 XPBD particles in WebGPU compute with solid map collision.</li><li><a href="https://tront.xyz/terrainlab/">Terrain Lab</a>: Streamed, editable Surface Nets terrain sandbox: carve, build, plant forests, wake volcanoes, dig up a fossil.</li></ul><p class="tront-hub"><a href="https://tront.xyz/games/">All games and tools</a> &middot; <a href="https://tront.xyz/blog/">Devlog</a> &middot; <a href="https://tront.xyz/discord/">Discord</a> &middot; <a href="https://github.com/TrentSterling/vibewater">Source on GitHub</a> &middot; <a href="https://tront.xyz/">tront.xyz</a></p></div></details>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "SoftwareApplication", "name": "VibeWater", "alternateName": ["VibeWater by Tront"], "url": "https://tront.xyz/vibewater/", "description": "2D water compute shader with 3D vertex displacement, a WebGPU demo.", "author": {"@type": "Person", "name": "Trent Sterling", "alternateName": "Tront", "url": "https://tront.xyz/"}, "publisher": {"@type": "Organization", "name": "Tront", "url": "https://tront.xyz/"}, "isAccessibleForFree": true, "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}, "applicationCategory": "DeveloperApplication", "operatingSystem": "Web browser"}</script>
+<!-- tront-about:end -->
 </body>
 </html>
